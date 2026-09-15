@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hitbot Welding Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100">
+    <div class="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-8">
+      <header class="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/50">
+        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">Hitbot S922</p>
+            <h1 class="text-3xl font-semibold">Welding Control Dashboard</h1>
+          </div>
+          <div class="flex items-center gap-3">
+            <div id="robotStatus" class="flex items-center gap-2 rounded-full border border-slate-600/40 bg-slate-500/10 px-4 py-2 text-sm text-slate-300">
+              <span id="robotStatusDot" class="h-2.5 w-2.5 rounded-full bg-slate-400"></span>
+              <span id="robotStatusText">Disconnected</span>
+            </div>
+            <button id="connectButton" class="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-200 transition hover:bg-cyan-500/20">
+              Connect
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div class="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/50">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold">Robot Controls</h2>
+            <div class="flex items-center gap-2">
+              <button id="homeButton" class="rounded-full border border-slate-500/40 bg-slate-500/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-500/20">
+                Home
+              </button>
+              <button id="freeDriveButton" class="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20">
+                Free Drive: OFF
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 md:grid-cols-2">
+            <div class="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">Weaving Pattern</h3>
+              <div class="mt-4 space-y-3">
+                <label class="block text-sm">
+                  <span class="mb-1 block text-slate-400">Amplitude</span>
+                  <input id="amplitude" type="number" step="0.1" value="0" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100" />
+                </label>
+                <label class="block text-sm">
+                  <span class="mb-1 block text-slate-400">Frequency</span>
+                  <input id="frequency" type="number" step="0.1" value="0" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100" />
+                </label>
+                <label class="block text-sm">
+                  <span class="mb-1 block text-slate-400">Duty Cycle</span>
+                  <input id="dutyCycle" type="number" step="0.01" min="0" max="1" value="0" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100" />
+                </label>
+                <button id="weaveButton" class="w-full rounded-lg bg-cyan-600 px-3 py-2 font-medium text-white transition hover:bg-cyan-500">
+                  Apply Weave
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">4-Point Box Weld</h3>
+              <div class="mt-4 space-y-3">
+                <label class="flex items-center gap-2 text-sm text-slate-300">
+                  <input id="arcOn" type="checkbox" checked class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+                  Arc trigger synchronized
+                </label>
+                <label class="block text-sm">
+                  <span class="mb-1 flex justify-between text-slate-400">
+                    <span>Speed</span><span id="speedValue" class="font-mono text-slate-200">20%</span>
+                  </span>
+                  <input id="speed" type="range" min="1" max="100" value="20" class="w-full accent-fuchsia-500" />
+                </label>
+                <button id="boxWeldButton" class="w-full rounded-lg bg-fuchsia-600 px-3 py-2 font-medium text-white transition hover:bg-fuchsia-500">
+                  Execute 4-Point Box Weld
+                </button>
+                <div id="statusBox" class="rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-sm text-slate-300">
+                  Ready to teach waypoints and run a weld.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/50">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold">Taught Waypoints</h2>
+            <span class="text-sm text-slate-400">P1 → P2 → P3 → P4 → P1</span>
+          </div>
+          <div id="waypointGrid" class="mt-6 space-y-4"></div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const waypointIds = ["P1", "P2", "P3", "P4"];
+      const waypointGrid = document.getElementById("waypointGrid");
+      const statusBox = document.getElementById("statusBox");
+      const freeDriveButton = document.getElementById("freeDriveButton");
+      const connectButton = document.getElementById("connectButton");
+
+      function updateRobotStatus(robot) {
+        const pill = document.getElementById("robotStatus");
+        const dot = document.getElementById("robotStatusDot");
+        const text = document.getElementById("robotStatusText");
+        const connected = robot && robot.connected;
+        text.textContent = connected ? `Connected · ${robot.ip}` : "Disconnected";
+        dot.className = `h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-400" : "bg-slate-400"}`;
+        pill.className = `flex items-center gap-2 rounded-full border px-4 py-2 text-sm ${connected ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-slate-600/40 bg-slate-500/10 text-slate-300"}`;
+        pill.title = robot && robot.connect_error
+          ? robot.connect_error
+          : (connected && robot.controller_version ? `Controller: ${robot.controller_version}` : "");
+      }
+
+      async function loadStatus() {
+        const response = await fetch("/api/status");
+        const payload = await response.json();
+        updateUI(payload);
+      }
+
+      function updateUI(payload) {
+        updateRobotStatus(payload.robot);
+        freeDriveButton.textContent = `Free Drive: ${payload.free_drive ? "ON" : "OFF"}`;
+        freeDriveButton.className = `rounded-full px-4 py-2 text-sm font-medium transition ${payload.free_drive ? "border border-emerald-500/40 bg-emerald-500/20 text-emerald-100" : "border border-emerald-500/40 bg-emerald-500/10 text-emerald-200"}`;
+        document.getElementById("amplitude").value = payload.weave.amplitude;
+        document.getElementById("frequency").value = payload.weave.frequency;
+        document.getElementById("dutyCycle").value = payload.weave.duty_cycle;
+
+        waypointGrid.innerHTML = waypointIds.map((pointId) => {
+          const point = payload.waypoints[pointId];
+          return `
+            <div class="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <div class="flex items-center justify-between">
+                <h3 class="font-semibold">${pointId}</h3>
+                <button data-point-id="${pointId}" class="teach-button rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700">
+                  Teach
+                </button>
+              </div>
+              <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                <label class="text-sm text-slate-400">
+                  <span class="mb-1 block">X</span>
+                  <input data-point-field="x" data-point-id="${pointId}" type="number" step="0.1" value="${point.x}" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100" />
+                </label>
+                <label class="text-sm text-slate-400">
+                  <span class="mb-1 block">Y</span>
+                  <input data-point-field="y" data-point-id="${pointId}" type="number" step="0.1" value="${point.y}" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100" />
+                </label>
+                <label class="text-sm text-slate-400">
+                  <span class="mb-1 block">Z</span>
+                  <input data-point-field="z" data-point-id="${pointId}" type="number" step="0.1" value="${point.z}" class="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-slate-100" />
+                </label>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      connectButton.addEventListener("click", async () => {
+        const original = connectButton.textContent;
+        connectButton.disabled = true;
+        connectButton.textContent = "Connecting…";
+        statusBox.textContent = "Connecting to robot…";
+        try {
+          const response = await fetch("/api/connect", { method: "POST" });
+          const payload = await response.json();
+          updateRobotStatus(payload.robot);
+          if (payload.robot.connected) {
+            statusBox.textContent = payload.robot.connect_error
+              ? `Connected with warning: ${payload.robot.connect_error}`
+              : `Connected to ${payload.robot.ip}.`;
+          } else {
+            statusBox.textContent = `Connection failed: ${payload.robot.connect_error || "unknown error"}`;
+          }
+        } catch (err) {
+          statusBox.textContent = `Connection request failed: ${err}`;
+        } finally {
+          connectButton.disabled = false;
+          connectButton.textContent = original;
+        }
+      });
+
+      freeDriveButton.addEventListener("click", async () => {
+        const response = await fetch("/api/free-drive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !freeDriveButton.textContent.includes("ON") }),
+        });
+        const payload = await response.json();
+        loadStatus();
+        statusBox.textContent = payload.free_drive ? "Free drive enabled." : "Free drive disabled.";
+      });
+
+      document.getElementById("weaveButton").addEventListener("click", async () => {
+        const payload = {
+          amplitude: Number(document.getElementById("amplitude").value),
+          frequency: Number(document.getElementById("frequency").value),
+          duty_cycle: Number(document.getElementById("dutyCycle").value),
+        };
+        await fetch("/api/weave", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        statusBox.textContent = `Weave updated: A=${payload.amplitude}, F=${payload.frequency}, DC=${payload.duty_cycle}`;
+      });
+
+      waypointGrid.addEventListener("click", async (event) => {
+        const button = event.target.closest(".teach-button");
+        if (!button) return;
+        
+        try {
+          const response = await fetch("/api/teach", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+          
+          if (!response.ok) {
+            const error = await response.json();
+            statusBox.textContent = `Error: ${error.detail}`;
+            return;
+          }
+          
+          const result = await response.json();
+          statusBox.textContent = `✓ Taught ${result.taught_point} at X=${result.position.x.toFixed(1)}, Y=${result.position.y.toFixed(1)}, Z=${result.position.z.toFixed(1)}`;
+          loadStatus();
+        } catch (err) {
+          statusBox.textContent = `Error teaching waypoint: ${err.message}`;
+        }
+      });
+
+      // Also allow manual editing of waypoint coordinates
+      waypointGrid.addEventListener("change", async (event) => {
+        const input = event.target.closest("[data-point-field]");
+        if (!input) return;
+        const pointId = input.dataset.pointId;
+        const xInput = waypointGrid.querySelector(`[data-point-field="x"][data-point-id="${pointId}"]`);
+        const yInput = waypointGrid.querySelector(`[data-point-field="y"][data-point-id="${pointId}"]`);
+        const zInput = waypointGrid.querySelector(`[data-point-field="z"][data-point-id="${pointId}"]`);
+        const payload = {
+          x: Number(xInput.value),
+          y: Number(yInput.value),
+          z: Number(zInput.value),
+        };
+        await fetch(`/api/waypoints/${pointId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        statusBox.textContent = `${pointId} updated to X=${payload.x}, Y=${payload.y}, Z=${payload.z}`;
+      });
+
+      const speedInput = document.getElementById("speed");
+      const speedValue = document.getElementById("speedValue");
+      speedInput.addEventListener("input", () => {
+        speedValue.textContent = `${speedInput.value}%`;
+      });
+
+      function renderExecution(payload, successMsg) {
+        if (!payload.execution_log) {
+          statusBox.innerHTML = `<p class="font-semibold text-red-400">✗ Server error: ${payload.error || "unknown"}</p>`;
+          return;
+        }
+        updateRobotStatus(payload.robot);
+        let banner;
+        if (payload.simulated) {
+          banner = `<p class="font-semibold text-amber-300">⚠ Robot not connected — this was a simulation, the arm did not move. Press <span class="underline">Connect</span> first.</p>`;
+        } else if (payload.ok) {
+          banner = `<p class="font-semibold text-emerald-300">✓ ${successMsg}</p>`;
+        } else {
+          banner = `<p class="font-semibold text-red-400">✗ Reported ${payload.errors.length} error(s) — arm may not have moved. See steps below.</p>`;
+        }
+        const steps = payload.execution_log.map((step) => {
+          const err = step.error;
+          const bad = err !== undefined && err !== null && err !== 0;
+          const tag = step.simulated ? "sim" : (bad ? `err ${err}` : "ok");
+          const color = step.simulated ? "text-amber-300" : (bad ? "text-red-400" : "text-emerald-300");
+          return `<div class="flex justify-between gap-3 font-mono text-xs"><span class="text-slate-300">${step.command}</span><span class="${color}">${tag}</span></div>`;
+        }).join("");
+        statusBox.innerHTML = `<div class="space-y-2">${banner}<div class="space-y-1 rounded-lg border border-slate-800 bg-slate-950/70 p-3">${steps}</div></div>`;
+      }
+
+      document.getElementById("homeButton").addEventListener("click", async () => {
+        const btn = document.getElementById("homeButton");
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Homing…";
+        statusBox.textContent = "Moving to home position…";
+        try {
+          const response = await fetch("/api/home", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ speed: Number(speedInput.value) }),
+          });
+          renderExecution(await response.json(), "Robot moved to home position.");
+        } catch (err) {
+          statusBox.textContent = `Home request failed: ${err}`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      });
+
+      document.getElementById("boxWeldButton").addEventListener("click", async () => {
+        const response = await fetch("/api/execute-box-weld", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            weave: {
+              amplitude: Number(document.getElementById("amplitude").value),
+              frequency: Number(document.getElementById("frequency").value),
+              duty_cycle: Number(document.getElementById("dutyCycle").value),
+            },
+            arc_on: document.getElementById("arcOn").checked,
+            speed: Number(speedInput.value),
+          }),
+        });
+        const payload = await response.json();
+        renderExecution(payload, "Box weld executed on the robot.");
+      });
+
+      loadStatus();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,45 @@
+Robot communication summary
+
+Transport:
+- The app talks to the robot over XML-RPC on http://<ROBOT_IP>:20003.
+- Main controller class: app/robot_controller.py.
+
+Connection:
+- GetControllerIP: check the controller is reachable.
+- GetSoftwareVersion: read controller version.
+- RobotEnable(1): enable the robot.
+
+Motion / mode:
+- Mode(1): manual mode.
+- Mode(0): auto mode.
+- DragTeachSwitch(1): enter free-drive/drag teach.
+- DragTeachSwitch(0): exit free-drive.
+- GetActualTCPPose(1): read current TCP pose.
+- GetInverseKin(...): solve joints for a target pose.
+- MoveL(...): linear move.
+- MoveJ(home=...): joint move to home.
+
+Welding:
+- ARCStart(...): start arc.
+- ARCEnd(...): stop arc.
+- WeaveSetPara(...): set weave settings.
+- WeaveStart(num): start weave.
+- WeaveEnd(num): stop weave.
+
+Setup:
+- Install Python 3 and pip.
+- Install Python packages: pip install -r requirements.txt
+- Required packages: fastapi, uvicorn, httpx, pytest, PyYAML.
+- Run server: python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+- Connect over a wired Ethernet link to the robot.
+- Set the PC IP on the robot subnet, for example 192.168.58.1/24.
+- Test reachability with ping to 192.168.58.2.
+
+SDK / API note:
+- No extra Fairino SDK is required for this project.
+- The app uses the robot's XML-RPC API directly.
+- The folder app/fairino/ is only reference/vendor code, not required for normal use.
+
+Usage rule:
+- Before motion, use RobotEnable(1), DragTeachSwitch(0), and Mode(0).
+- After free-drive, motion will not run until these are reset.

@@ -1,90 +1,94 @@
 # Hitbot Welding Dashboard
 
-A lightweight FastAPI and HTML/JS/Tailwind dashboard for controlling a Hitbot S922 welding robot over a TCP/IP command bridge.
+A FastAPI web app for controlling a Hitbot S922 welding robot from a browser dashboard.
 
-## Features
-- Free-drive toggle
-- Weaving pattern configuration
-- Taught waypoint capture for P1 through P4
-- 4-point box weld workflow with sequential linear motion and arc trigger sequencing
-- Modular backend structure with a small robot controller abstraction
+## Overview
+This project provides:
+- A browser UI for robot control and status
+- Free-drive mode toggling and waypoint teaching
+- Weave configuration and 4-point box weld execution
+- A simulated mode for testing without a live robot connection
+- A Python API layer that can talk to the Fairino controller over XML-RPC
 
-## Run locally (no virtualenv needed)
+## Requirements
+- Python 3.10+
+- A network connection to the robot controller
+- Optional: a real robot and controller access for live motion testing
+
+## Clone and run
 ```bash
-cd /home/xp/hitbotwelding
-python3 -m pip install --user --break-system-packages -r requirements.txt
-python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+git clone <your-repository-url>
+cd hitbotwelding
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-Open http://127.0.0.1:8000/ in your browser.
-
-## Robot connection (Fairino SDK)
-The S922 is a 6-axis cobot on the Fairino controller, so the backend drives it
-by talking **XML-RPC directly to the controller on port 20003** (see
-`app/robot_controller.py`). Pressing **Free Drive** switches the arm to manual
-mode and enters drag teaching:
-
-- ON  -> `Mode(1)` then `DragTeachSwitch(1)`
-- OFF -> `DragTeachSwitch(0)` then `Mode(0)`
-
-Click **Connect** in the dashboard to open the connection on demand; the status
-pill shows Connected/Disconnected (hover it for the controller version, or the
-error on failure). Setting `ROBOT_CONNECT=1` additionally auto-connects at
-startup. Without either, the app runs in simulated mode (commands are echoed,
-not sent):
-
+Start the app:
 ```bash
-export ROBOT_CONNECT=1          # auto-connect at startup
-export ROBOT_IP=192.168.58.2    # controller IP (Fairino default)
-export ROBOT_TOOL=0             # tool coordinate id for MoveL (default 0)
-export ROBOT_USER=0             # user coordinate id for MoveL (default 0)
-export ROBOT_SPEED=20           # default MoveL velocity percent (default 20)
-export ROBOT_TIMEOUT=5          # per-call socket timeout, seconds (default 5)
-export ROBOT_MOTION_TIMEOUT=120 # timeout for blocking MoveL/arc calls, seconds
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Before any motion the box weld runs `RobotEnable(1)` → `DragTeachSwitch(0)` →
-`Mode(0)`, because after Free Drive the arm is left in manual/drag mode where
-`MoveL` is ignored. If the app is not connected, Execute runs in **simulated**
-mode (the arm does not move) and the dashboard says so.
-
-Every Fairino call returns an error code (`0` = success); the `/api/free-drive`
-and `/api/execute-box-weld` responses report each step so failures are visible.
-
-### Welding execution
-The **Execute 4-Point Box Weld** button runs this sequence (`app/state.py`):
-
-1. Rapid to the seam start **P1 with the arc OFF**
-2. `WeaveSetPara` + `ARCStart` + `WeaveStart` (weave only if amplitude & frequency > 0)
-3. Weld the seam **P2 → P3 → P4 → P1** (`MoveL`, oriented pose)
-4. `WeaveEnd` + `ARCEnd`
-
-**Uncheck "Arc On" for a dry run** — the full motion path with no arc, for
-validating taught waypoints safely. Teach P1–P4 by hand first (Free Drive →
-Teach); teaching now captures full 6-DOF pose (position **and** torch
-orientation), which `MoveL` replays.
-
-Welder settings are site-specific — set to match your welding setup before
-firing a live arc:
-
-```bash
-export ROBOT_ARC_IOTYPE=0       # 0=controller I/O, 1=extended I/O
-export ROBOT_ARC_NUM=0          # welder profile number
-export ROBOT_ARC_TIMEOUT=10000  # arc ignition/extinguish timeout, ms
-export ROBOT_WEAVE_NUM=0        # weave param config number
-export ROBOT_WEAVE_TYPE=0       # 0=planar triangle (see Fairino WeaveSetPara)
+Open the dashboard here:
+```text
+http://127.0.0.1:8000/
 ```
 
-### Networking
-The controller is reached over a **direct ethernet link**, not WiFi. Give the
-PC's wired interface an IP on the robot's subnet and verify before connecting:
+## Run tests
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q
+```
+
+> This avoids external ROS pytest plugins from being auto-loaded in environments where they are not installed.
+
+## Optional environment variables
+```bash
+export ROBOT_CONNECT=1
+export ROBOT_IP=192.168.58.2
+export ROBOT_TOOL=0
+export ROBOT_USER=0
+export ROBOT_SPEED=20
+export ROBOT_TIMEOUT=5
+export ROBOT_MOTION_TIMEOUT=120
+export ROBOT_ARC_IOTYPE=0
+export ROBOT_ARC_NUM=0
+export ROBOT_ARC_TIMEOUT=10000
+export ROBOT_WEAVE_NUM=0
+export ROBOT_WEAVE_TYPE=0
+```
+
+## Robot connection notes
+The robot is reached over a direct Ethernet link, not Wi-Fi. Use a wired interface on the same subnet as the controller and verify the connection before live motion.
 
 ```bash
-sudo ip addr add 192.168.58.1/24 dev <eth>   # robot is 192.168.58.2 by default
 ping -c3 192.168.58.2
-python3 scripts/diagnose_robot.py            # layer-by-layer check (moves the arm!)
+python3 scripts/diagnose_robot.py
 ```
 
-> Note: we talk raw XML-RPC rather than using the vendored Fairino SDK because
-> the current SDK build requires the CNDE state port (20005), which FR5 v3.8.x
-> firmware does not serve. `app/fairino/` remains vendored for reference only.
+If the robot is not connected, the app runs in simulated mode and logs commands without sending them to the controller.
+
+## Project structure
+```text
+.
+├── app/
+│   ├── fairino/
+│   ├── static/
+│   ├── api.py
+│   ├── main.py
+│   ├── robot_controller.py
+│   ├── state.py
+│   └── __init__.py
+├── scripts/
+├── tests/
+├── README.md
+├── requirements.txt
+├── pytest.ini
+├── .gitignore
+└── robot_communication.txt
+```
+
+## Notes
+- The dashboard is intended for a valid robot configuration and a safe testing setup.
+- For live weld operations, verify all waypoints and dry-run the motion before enabling the arc.
+- The app includes a simulated fallback so it can be inspected without a connected controller.

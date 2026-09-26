@@ -9,6 +9,7 @@ from app.robot_controller import RobotController
 @dataclass
 class WeldingState:
     free_drive: bool = False
+    speed: float = 20.0
     weave: dict[str, float] = field(
         default_factory=lambda: {"amplitude": 0.0, "frequency": 0.0, "duty_cycle": 0.0}
     )
@@ -28,6 +29,7 @@ class WeldingState:
     def as_status(self) -> dict[str, Any]:
         return {
             "free_drive": self.free_drive,
+            "speed": self.speed,
             "weave": self.weave,
             "waypoints": self.waypoints,
             "last_plan": self.last_plan,
@@ -45,12 +47,26 @@ class WeldingState:
             return None
         return controller.set_free_drive(enabled)
 
+    def set_speed(self, speed: float | None) -> None:
+        if speed is None:
+            return
+        self.speed = float(speed)
+
     def set_weave(self, weave: dict[str, float]) -> None:
         self.weave = {
             "amplitude": float(weave.get("amplitude", 0.0)),
             "frequency": float(weave.get("frequency", 0.0)),
             "duty_cycle": float(weave.get("duty_cycle", 0.0)),
         }
+
+    def clear_waypoints(self) -> None:
+        self.waypoints = {
+            "P1": {"x": 0.0, "y": 0.0, "z": 0.0, "rx": 0.0, "ry": 0.0, "rz": 0.0},
+            "P2": {"x": 0.0, "y": 0.0, "z": 0.0, "rx": 0.0, "ry": 0.0, "rz": 0.0},
+            "P3": {"x": 0.0, "y": 0.0, "z": 0.0, "rx": 0.0, "ry": 0.0, "rz": 0.0},
+            "P4": {"x": 0.0, "y": 0.0, "z": 0.0, "rx": 0.0, "ry": 0.0, "rz": 0.0},
+        }
+        self.next_teach_point = 1
 
     def set_waypoint(self, point_id: str, point: dict[str, float]) -> None:
         # Preserve any previously-taught orientation when only x/y/z are edited.
@@ -118,13 +134,16 @@ class WeldingState:
         plan, _ = self.build_box_weld_plan(arc_on)
         execution_log: list[dict[str, Any]] = []
         weaving = arc_on and self.weave["amplitude"] > 0 and self.weave["frequency"] > 0
+        effective_speed = float(speed) if speed is not None else float(self.speed)
+        controller.default_speed = effective_speed
+        controller.set_activity("moving")
 
         # Ensure the arm is enabled, out of drag mode, and in automatic mode so
         # MoveL actually runs (Free Drive leaves it in manual/drag mode).
         execution_log.extend(controller.prepare_for_motion())
 
         # Approach the seam start with the arc off.
-        execution_log.append(self._move_to(controller, plan[0]["position"], speed))
+        execution_log.append(self._move_to(controller, plan[0]["position"], effective_speed))
 
         if arc_on:
             if weaving:
@@ -132,12 +151,13 @@ class WeldingState:
                     controller.weave_set_para(self.weave["frequency"], self.weave["amplitude"])
                 )
             execution_log.append(controller.arc_start())
+            controller.set_activity("welding")
             if weaving:
                 execution_log.append(controller.weave_start())
 
         # Weld the seam through the remaining corners and back to the start.
         for step in plan[1:]:
-            execution_log.append(self._move_to(controller, step["position"], speed))
+            execution_log.append(self._move_to(controller, step["position"], effective_speed))
 
         if arc_on:
             if weaving:
@@ -145,4 +165,6 @@ class WeldingState:
             execution_log.append(controller.arc_end())
 
         self.last_execution = execution_log
+        errors = [step for step in execution_log if step.get("error") not in (None, 0)]
+        controller.set_activity("fault" if errors else ("ready" if not arc_on else "ready"))
         return execution_log

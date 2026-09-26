@@ -15,6 +15,13 @@
             <h1 class="text-3xl font-semibold">Welding Control Dashboard</h1>
           </div>
           <div class="flex items-center gap-3">
+            <div id="activityLeds" class="hidden items-center gap-2 rounded-full border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs text-slate-300 sm:flex" aria-label="Robot activity indicators">
+              <span data-led="home" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full bg-slate-700"></i>Home</span>
+              <span data-led="moving" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full bg-slate-700"></i>Moving</span>
+              <span data-led="welding" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full bg-slate-700"></i>Welding</span>
+              <span data-led="free_drive" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full bg-slate-700"></i>Free</span>
+              <span data-led="fault" class="flex items-center gap-1.5"><i class="h-2.5 w-2.5 rounded-full bg-slate-700"></i>Fault</span>
+            </div>
             <div id="robotStatus" class="flex items-center gap-2 rounded-full border border-slate-600/40 bg-slate-500/10 px-4 py-2 text-sm text-slate-300">
               <span id="robotStatusDot" class="h-2.5 w-2.5 rounded-full bg-slate-400"></span>
               <span id="robotStatusText">Disconnected</span>
@@ -30,9 +37,21 @@
         <section class="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/50">
           <div class="flex items-center justify-between">
             <h2 class="text-xl font-semibold">Robot Controls</h2>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <button id="homeButton" class="rounded-full border border-slate-500/40 bg-slate-500/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-500/20">
                 Home
+              </button>
+              <button id="setHomeButton" class="rounded-full border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-200 transition hover:bg-amber-500/20">
+                Set Current as Home
+              </button>
+              <button id="estopButton" class="rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-200 transition hover:bg-red-500/20">
+                E-Stop
+              </button>
+              <button id="disconnectButton" class="rounded-full border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-200 transition hover:bg-orange-500/20">
+                Disconnect
+              </button>
+              <button id="clearCacheButton" class="rounded-full border border-violet-500/40 bg-violet-500/10 px-4 py-2 text-sm font-medium text-violet-200 transition hover:bg-violet-500/20">
+                Clear Cache
               </button>
               <button id="freeDriveButton" class="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20">
                 Free Drive: OFF
@@ -89,7 +108,12 @@
         <section class="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/50">
           <div class="flex items-center justify-between">
             <h2 class="text-xl font-semibold">Taught Waypoints</h2>
-            <span class="text-sm text-slate-400">P1 → P2 → P3 → P4 → P1</span>
+            <div class="flex items-center gap-2">
+              <button id="clearWaypointsButton" class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/20">
+                Clear Waypoints
+              </button>
+              <span class="text-sm text-slate-400">P1 → P2 → P3 → P4 → P1</span>
+            </div>
           </div>
           <div id="waypointGrid" class="mt-6 space-y-4"></div>
         </section>
@@ -114,6 +138,20 @@
         pill.title = robot && robot.connect_error
           ? robot.connect_error
           : (connected && robot.controller_version ? `Controller: ${robot.controller_version}` : "");
+        const activity = connected ? (robot.activity || "ready") : "disconnected";
+        const activeColor = {
+          home: "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]",
+          moving: "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.9)]",
+          welding: "bg-fuchsia-400 shadow-[0_0_10px_rgba(232,121,249,0.9)]",
+          free_drive: "bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.9)]",
+          fault: "bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.9)]",
+        };
+        document.querySelectorAll("[data-led]").forEach((led) => {
+          const dot = led.querySelector("i");
+          dot.className = `h-2.5 w-2.5 rounded-full ${activeColor[led.dataset.led] && led.dataset.led === activity ? activeColor[led.dataset.led] : "bg-slate-700"}`;
+          led.classList.toggle("text-slate-100", led.dataset.led === activity);
+          led.classList.toggle("text-slate-500", led.dataset.led !== activity);
+        });
       }
 
       async function loadStatus() {
@@ -126,6 +164,9 @@
         updateRobotStatus(payload.robot);
         freeDriveButton.textContent = `Free Drive: ${payload.free_drive ? "ON" : "OFF"}`;
         freeDriveButton.className = `rounded-full px-4 py-2 text-sm font-medium transition ${payload.free_drive ? "border border-emerald-500/40 bg-emerald-500/20 text-emerald-100" : "border border-emerald-500/40 bg-emerald-500/10 text-emerald-200"}`;
+        const selectedSpeed = payload.speed ?? Number(speedInput.value || 20);
+        speedInput.value = selectedSpeed;
+        speedValue.textContent = `${selectedSpeed}%`;
         document.getElementById("amplitude").value = payload.weave.amplitude;
         document.getElementById("frequency").value = payload.weave.frequency;
         document.getElementById("dutyCycle").value = payload.weave.duty_cycle;
@@ -256,7 +297,23 @@
       const speedInput = document.getElementById("speed");
       const speedValue = document.getElementById("speedValue");
       speedInput.addEventListener("input", () => {
-        speedValue.textContent = `${speedInput.value}%`;
+        const nextSpeed = Number(speedInput.value);
+        speedValue.textContent = `${nextSpeed}%`;
+      });
+
+      document.getElementById("clearWaypointsButton").addEventListener("click", async () => {
+        try {
+          const response = await fetch("/api/waypoints/reset", { method: "POST" });
+          const payload = await response.json();
+          if (response.ok) {
+            statusBox.textContent = "Waypoints cleared to zero positions.";
+            loadStatus();
+            return;
+          }
+          statusBox.textContent = `Failed to clear waypoints: ${payload.detail || "unknown error"}`;
+        } catch (err) {
+          statusBox.textContent = `Clear waypoints failed: ${err}`;
+        }
       });
 
       function renderExecution(payload, successMsg) {
@@ -301,6 +358,65 @@
         } finally {
           btn.disabled = false;
           btn.textContent = original;
+        }
+      });
+
+      document.getElementById("setHomeButton").addEventListener("click", async () => {
+        const btn = document.getElementById("setHomeButton");
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Setting…";
+        statusBox.textContent = "Setting current position as the new home target…";
+        try {
+          const response = await fetch("/api/home/current", { method: "POST" });
+          const payload = await response.json();
+          if (payload.ok) {
+            statusBox.textContent = `Home updated to current joint position: ${payload.home_joints.map((value) => value.toFixed(1)).join(", ")}`;
+          } else {
+            statusBox.textContent = `Unable to set current home: ${payload.error}`;
+          }
+        } catch (err) {
+          statusBox.textContent = `Set current home failed: ${err}`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      });
+
+      document.getElementById("estopButton").addEventListener("click", async () => {
+        try {
+          const response = await fetch("/api/estop", { method: "POST" });
+          const payload = await response.json();
+          updateRobotStatus(payload.robot);
+          statusBox.textContent = "Emergency stop triggered. Robot disconnected.";
+        } catch (err) {
+          statusBox.textContent = `E-stop request failed: ${err}`;
+        }
+      });
+
+      document.getElementById("disconnectButton").addEventListener("click", async () => {
+        try {
+          const response = await fetch("/api/disconnect", { method: "POST" });
+          const payload = await response.json();
+          updateRobotStatus(payload.robot);
+          statusBox.textContent = "Robot disconnected.";
+        } catch (err) {
+          statusBox.textContent = `Disconnect request failed: ${err}`;
+        }
+      });
+
+      document.getElementById("clearCacheButton").addEventListener("click", async () => {
+        try {
+          if (typeof caches !== "undefined") {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((key) => caches.delete(key)));
+          }
+          localStorage.clear();
+          sessionStorage.clear();
+          statusBox.textContent = "Browser cache cleared. Reloading dashboard…";
+          setTimeout(() => window.location.reload(), 150);
+        } catch (err) {
+          statusBox.textContent = `Clear cache failed: ${err}`;
         }
       });
 

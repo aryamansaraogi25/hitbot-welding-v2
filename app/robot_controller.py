@@ -52,6 +52,7 @@ class RobotController:
         self.connected = False
         self.connect_error: str | None = None
         self.controller_version: str | None = None
+        self.activity = "disconnected"
         if os.getenv("ROBOT_CONNECT", "").lower() in ("1", "true", "yes"):
             self.connect()
 
@@ -72,6 +73,7 @@ class RobotController:
         self.connected = False
         self.connect_error = None
         self.controller_version = None
+        self.activity = "disconnected"
         try:
             proxy = xmlrpc.client.ServerProxy(f"http://{self.ip}:{self.XMLRPC_PORT}")
             old = socket.getdefaulttimeout()
@@ -90,6 +92,7 @@ class RobotController:
 
             self.proxy = proxy
             self.connected = True
+            self.activity = "ready"
             try:
                 ver = proxy.GetSoftwareVersion()
                 if isinstance(ver, list) and ver and ver[0] == 0:
@@ -100,6 +103,7 @@ class RobotController:
             enable_error = self._call("RobotEnable", 1)
             if enable_error != 0:
                 self.connect_error = f"Connected, but RobotEnable(1) returned error {enable_error}"
+                self.activity = "fault"
         except (OSError, xmlrpc.client.Fault, xmlrpc.client.ProtocolError) as exc:
             self.connect_error = (
                 f"Could not reach Fairino controller at {self.ip}:{self.XMLRPC_PORT} "
@@ -115,7 +119,11 @@ class RobotController:
             "connected": self.connected,
             "connect_error": self.connect_error,
             "controller_version": self.controller_version,
+            "activity": self.activity,
         }
+
+    def set_activity(self, activity: str) -> None:
+        self.activity = activity
 
     def set_free_drive(self, enabled: bool) -> dict[str, Any]:
         """Enter/exit drag (free-drive / manual) mode on the S922.
@@ -126,8 +134,10 @@ class RobotController:
         Every Fairino call returns an error code (0 = success).
         """
         if enabled:
+            self.activity = "free_drive"
             steps = [("Mode", 1), ("DragTeachSwitch", 1)]
         else:
+            self.activity = "ready"
             steps = [("DragTeachSwitch", 0), ("Mode", 0)]
 
         results: list[dict[str, Any]] = []
@@ -143,6 +153,47 @@ class RobotController:
                 results.append({"simulated": False, "command": command, "error": f"{type(exc).__name__}: {exc}"})
         ok = all(r.get("error", 0) == 0 for r in results)
         return {"steps": results, "ok": ok, "command": f"free_drive({int(bool(enabled))})"}
+
+    def estop(self) -> dict[str, Any]:
+        """Immediately stop any robot motion, then leave the controller disconnected."""
+        steps: list[dict[str, Any]] = []
+        if self.proxy is not None:
+            for command, method, args in [
+                ("StopMove()", "StopMove", ()),
+                ("RobotEnable(0)", "RobotEnable", (0,)),
+            ]:
+                try:
+                    error = self._call(method, *args)
+                    steps.append({"command": command, "error": error, "simulated": False})
+                except Exception as exc:  # noqa: BLE001
+                    steps.append({"command": command, "error": f"{type(exc).__name__}: {exc}", "simulated": False})
+        else:
+            steps.append({"command": "StopMove()", "error": 0, "simulated": True})
+
+        self.connected = False
+        self.proxy = None
+        self.activity = "fault"
+        self.connect_error = "Emergency stop triggered. Reconnect to resume robot control."
+        return {
+            "simulated": not steps or all(step.get("simulated") for step in steps),
+            "command": "EmergencyStop()",
+            "error": 0,
+            "steps": steps,
+            "robot": self.status(),
+        }
+
+    def disconnect(self) -> dict[str, Any]:
+        """Disconnect the XML-RPC bridge cleanly and mark the robot as unavailable."""
+        self.connected = False
+        self.proxy = None
+        self.activity = "disconnected"
+        self.connect_error = "Robot disconnected."
+        return {
+            "simulated": False,
+            "command": "Disconnect()",
+            "error": 0,
+            "robot": self.status(),
+        }
 
     def get_current_position(self) -> dict[str, float]:
         """Get current TCP pose. Returns simulated values in sim mode."""
@@ -172,7 +223,10 @@ class RobotController:
 
         # Solve joints for the target pose, then issue the linear move. This
         # mirrors what the Fairino SDK's MoveL() does internally.
-        ik = self._call("GetInverseKin", 0, pose, -1)
+        try:
+            ik = self._call("GetInverseKin", 0, pose, -1)
+        except Exception as exc:  # noqa: BLE001 - surface controller failures in the execution log
+            return {"simulated": False, "command": command, "error": f"{type(exc).__name__}: {exc}"}
         if not (isinstance(ik, list) and ik and ik[0] == 0):
             return {"simulated": False, "command": command, "error": f"GetInverseKin failed: {ik!r}"}
         joints = list(ik[1:7])
@@ -180,19 +234,22 @@ class RobotController:
         #   joint_pos, desc_pos, tool, user, vel, acc, ovl, blendR, blendMode,
         #   exaxis_pos, search, offset_flag, offset_pos
         # MoveL blocks until the move completes -> use the long motion timeout.
-        error = self._call(
-            "MoveL",
-            joints, pose, self.tool, self.user, vel,
-            0.0,                                # acc
-            100.0,                              # ovl
-            -1.0,                               # blendR (blocking, move-to-position)
-            0,                                  # blendMode
-            [0.0, 0.0, 0.0, 0.0],               # exaxis_pos
-            0,                                  # search
-            0,                                  # offset_flag
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],     # offset_pos
-            timeout=self.motion_timeout,
-        )
+        try:
+            error = self._call(
+                "MoveL",
+                joints, pose, self.tool, self.user, vel,
+                0.0,                                # acc
+                100.0,                              # ovl
+                -1.0,                               # blendR (blocking, move-to-position)
+                0,                                  # blendMode
+                [0.0, 0.0, 0.0, 0.0],               # exaxis_pos
+                0,                                  # search
+                0,                                  # offset_flag
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],     # offset_pos
+                timeout=self.motion_timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface controller failures in the execution log
+            error = f"{type(exc).__name__}: {exc}"
         return {"simulated": False, "command": command, "error": error}
 
     def _robot_call(self, command: str, method: str, *args: Any, timeout: float | None = None) -> dict[str, Any]:
@@ -240,6 +297,35 @@ class RobotController:
 
     def weave_end(self) -> dict[str, Any]:
         return self._robot_call(f"WeaveEnd({self.weave_num})", "WeaveEnd", self.weave_num)
+
+    def set_current_home(self) -> dict[str, Any]:
+        """Capture the current joint position and use it as the robot's home target."""
+        if self.proxy is None:
+            return {"simulated": True, "command": "SetCurrentHome()", "home_joints": self.home_joints}
+
+        try:
+            reply = self._call("GetActualJointPosDegree", 1)
+            if isinstance(reply, list) and reply and reply[0] == 0:
+                self.home_joints = [float(v) for v in reply[1:7]]
+                return {
+                    "simulated": False,
+                    "command": "SetCurrentHome()",
+                    "home_joints": self.home_joints,
+                    "error": 0,
+                }
+            return {
+                "simulated": False,
+                "command": "SetCurrentHome()",
+                "home_joints": self.home_joints,
+                "error": reply,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "simulated": False,
+                "command": "SetCurrentHome()",
+                "home_joints": self.home_joints,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
     def go_home(self, speed: float | None = None) -> dict[str, Any]:
         """Joint-move the arm to its home configuration (default all joints 0)."""

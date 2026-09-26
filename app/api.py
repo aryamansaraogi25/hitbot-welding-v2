@@ -51,10 +51,13 @@ class HomeRequest(BaseModel):
 
 @router.post("/home")
 def go_home(payload: HomeRequest | None = None) -> dict[str, Any]:
-    speed = payload.speed if payload else None
+    speed = payload.speed if payload and payload.speed is not None else state.speed
+    state.set_speed(speed)
+    controller.set_activity("moving")
     execution_log = [*controller.prepare_for_motion(), controller.go_home(speed)]
     simulated = any(step.get("simulated") for step in execution_log)
     errors = [step for step in execution_log if step.get("error") not in (None, 0)]
+    controller.set_activity("fault" if errors else "home")
     return {
         "execution_log": execution_log,
         "robot": controller.status(),
@@ -64,16 +67,58 @@ def go_home(payload: HomeRequest | None = None) -> dict[str, Any]:
     }
 
 
+@router.post("/home/current")
+def set_current_home() -> dict[str, Any]:
+    home_result = controller.set_current_home()
+    return {
+        "home_joints": home_result["home_joints"],
+        "simulated": home_result.get("simulated", False),
+        "ok": home_result.get("error") in (None, 0),
+        "error": home_result.get("error"),
+        "robot": controller.status(),
+    }
+
+
 @router.post("/free-drive")
 def toggle_free_drive(payload: TogglePayload) -> dict[str, Any]:
     result = state.set_free_drive(payload.enabled, controller)
-    return {"free_drive": state.free_drive, "command_result": result}
+    return {
+        "free_drive": state.free_drive,
+        "command_result": result,
+        "robot": controller.status(),
+    }
+
+
+@router.post("/estop")
+def estop() -> dict[str, Any]:
+    result = controller.estop()
+    return {
+        "command_result": result,
+        "robot": controller.status(),
+        "connected": False,
+    }
+
+
+@router.post("/disconnect")
+def disconnect_robot() -> dict[str, Any]:
+    result = controller.disconnect()
+    return {
+        "command_result": result,
+        "robot": controller.status(),
+        "connected": False,
+    }
 
 
 @router.post("/weave")
 def update_weave(payload: WeavePayload) -> dict[str, Any]:
     state.set_weave(payload.model_dump())
     return {"weave": state.weave}
+
+
+@router.post("/waypoints/reset")
+def reset_waypoints() -> dict[str, Any]:
+    state.clear_waypoints()
+    return {"waypoints": state.waypoints, "next_teach_point": state.next_teach_point}
 
 
 @router.post("/waypoints/{point_id}")
@@ -88,8 +133,10 @@ def save_waypoint(point_id: str, payload: PointPayload) -> dict[str, Any]:
 def execute_box_weld(payload: WeldRequest) -> dict[str, Any]:
     if payload.weave is not None:
         state.set_weave(payload.weave.model_dump())
+    effective_speed = payload.speed if payload.speed is not None else state.speed
+    state.set_speed(effective_speed)
     plan, arc_sequence = state.build_box_weld_plan(payload.arc_on)
-    execution_log = state.execute_box_weld(controller, payload.arc_on, payload.speed)
+    execution_log = state.execute_box_weld(controller, payload.arc_on, effective_speed)
     simulated = any(step.get("simulated") for step in execution_log)
     errors = [step for step in execution_log if step.get("error") not in (None, 0)]
     return {
@@ -97,6 +144,7 @@ def execute_box_weld(payload: WeldRequest) -> dict[str, Any]:
         "arc_sequence": arc_sequence,
         "execution_log": execution_log,
         "weave": state.weave,
+        "speed": state.speed,
         "robot": controller.status(),
         "simulated": simulated,
         "ok": not simulated and not errors,

@@ -1,5 +1,7 @@
 # Hitbot Welding
 
+**Author:** Aryaman Saraogi
+
 A lightweight FastAPI dashboard for controlling a Hitbot welding robot from a browser.
 
 ## Features
@@ -40,3 +42,6 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q
 ## Notes
 - If the robot is not connected, the app can still run in simulated mode.
 - For real welding operations, confirm the controller is available on the network and the setup is safe.
+
+## Author
+- Aryaman Saraogi
